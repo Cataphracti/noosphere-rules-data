@@ -1,122 +1,102 @@
 # Publishing Noosphere rules data
 
-## Purpose
+## Source of truth
 
-`Cataphracti/noosphere-rules-data` is the public delivery repository. The private `Cataphracti/Noosphere` repository remains the source of truth and must build the complete data snapshot.
+The private `Cataphracti/Noosphere` repository owns the runtime source, deterministic pack generator, Ed25519 signing key secret, migrations and release workflow.
 
-The installed application should eventually use this stable endpoint:
+This public repository is the delivery endpoint only:
 
 ```text
 https://github.com/Cataphracti/noosphere-rules-data/releases/latest/download/manifest.json
 ```
 
-The currently shipped endpoint `https://data.noosphere.app/manifest.json` is compiled into the APK through Expo environment configuration. Existing installations therefore require one transition APK before GitHub Releases can become the production update channel.
+## Required private-repository configuration
 
-## Required publisher secret
-
-Create a fine-grained GitHub personal access token that can write repository contents for **only** `Cataphracti/noosphere-rules-data`, then add it to the private `Cataphracti/Noosphere` repository as this Actions secret:
+The private repository must contain:
 
 ```text
 RULES_DATA_PUBLISH_TOKEN
-```
-
-Recommended minimum token access:
-
-- Repository access: only `Cataphracti/noosphere-rules-data`;
-- Repository permissions → Contents: Read and write;
-- Metadata: Read-only (automatic).
-
-No publishing token must be stored in the public data repository or committed to either repository.
-
-An optional Actions variable can be introduced later if the target repository becomes configurable:
-
-```text
+RULES_DATA_ED25519_PRIVATE_KEY_BASE64
 RULES_DATA_PUBLISH_REPOSITORY=Cataphracti/noosphere-rules-data
 ```
 
-For the first implementation, keeping the repository name explicit in the workflow is safer and easier to audit.
+`RULES_DATA_PUBLISH_TOKEN` is a fine-grained personal access token restricted to this repository with **Contents: Read and write**. The private signing key is a base64-encoded PKCS#8 Ed25519 key and is never committed.
 
-## Release naming
+The private repository includes `scripts/setup-rules-data-github.ps1`, which performs all automatable setup and rotates the embedded production public key.
 
-Use tags with this format:
+## Release naming and assets
 
-```text
-rules-v<release-id>
-```
-
-Example:
+Tag:
 
 ```text
-rules-v2026.07.24.1
+rules-data-<dataVersion>
 ```
 
-The ZIP must use the same release identifier:
+Required release assets:
 
 ```text
-noosphere-rules-pack-2026.07.24.1.zip
+noosphere-rules-pack.zip
+manifest.json
+generation-report.json
 ```
 
-Never replace an already published ZIP or reuse a release tag. Publish a new release identifier for every correction.
-
-## Required manifest fields
-
-A production manifest must follow `schemas/manifest.schema.json` and contain:
-
-- manifest schema version;
-- channel (`production` or `beta`);
-- release identifier and tag;
-- publication timestamp;
-- minimum compatible app version and Android build number;
-- remote data schema version;
-- immutable ZIP filename and URL;
-- ZIP byte size;
-- lowercase SHA-256 digest;
-- optional Ed25519 signature block when signing is enabled.
-
-## Workflow split
-
-The build and caller workflow belongs in the private `Cataphracti/Noosphere` repository because that repository contains the source data and release checks.
-
-The reusable cross-repository publisher is stored in this public repository:
+The immutable archive URL stored in the manifest is:
 
 ```text
-.github/workflows/publish-release.yml
+https://github.com/Cataphracti/noosphere-rules-data/releases/download/rules-data-<dataVersion>/noosphere-rules-pack.zip
 ```
 
-The private caller passes the generated ZIP artifact and the `RULES_DATA_PUBLISH_TOKEN` secret to that reusable workflow. Pin the reusable workflow by commit SHA, as shown in `examples/noosphere-caller-workflow.yml`.
+Never reuse a tag, overwrite an asset or edit an already published pack. A correction uses a higher `dataRevision`, a new `dataVersion` and a new release.
 
-Together the workflows must:
+## Manifest contract
 
-1. Check out an explicit commit from `main` or an approved release branch.
-2. Run the existing public release gate and remote-data-specific validation.
-3. Build one complete snapshot pack; incremental patches are not used for v1.
-4. Produce a deterministic ZIP with the complete remotely replaceable dataset.
-5. Upload that ZIP as an Actions artifact for the publisher job.
-6. Calculate byte size and SHA-256 from the exact ZIP that will be released.
-7. Generate `manifest.json` from those calculated values.
-8. Create a draft GitHub Release in `Cataphracti/noosphere-rules-data`.
-9. Upload the ZIP first.
-10. Upload `manifest.json` last.
-11. Download both assets again and verify filename, size and SHA-256.
-12. Publish a production release as Latest, or publish a beta release as a prerelease.
+`manifest.json` follows `schemas/manifest.schema.json` and includes:
 
-Use `RULES_DATA_PUBLISH_TOKEN` only for the cross-repository release operations. Normal checks in the private application repository should continue to use its built-in `GITHUB_TOKEN`.
+- `manifestSchemaVersion`;
+- channel: `stable`, `beta` or `internal`;
+- monotonically increasing `dataRevision`;
+- immutable `dataVersion`;
+- user-facing display name and publication time;
+- minimum compatible Android `versionCode`;
+- required runtime capabilities;
+- archive URL, exact byte size and SHA-256;
+- Ed25519 signature, payload type and trusted key ID;
+- release notes.
+
+## Publication order
+
+The private publisher workflow:
+
+1. runs the complete rules-data regression suite;
+2. builds one deterministic full snapshot;
+3. signs the raw SHA-256 digest with Ed25519;
+4. validates the generated archive and manifest;
+5. refuses an existing release tag;
+6. creates a draft release in this repository;
+7. uploads `noosphere-rules-pack.zip` and `generation-report.json` first;
+8. downloads the archive again and verifies SHA-256;
+9. uploads `manifest.json` last;
+10. publishes the release as Latest;
+11. verifies the public endpoint again.
+
+Uploading the manifest last prevents clients from observing a pack URL before the archive is available.
+
+## Independent validation
+
+Every published release triggers `.github/workflows/validate-release.yml` in this repository. It downloads `manifest.json` and `noosphere-rules-pack.zip`, then verifies:
+
+- required manifest fields and channel;
+- tag/dataVersion/URL consistency;
+- trusted key and allowed channel;
+- exact archive size;
+- exact SHA-256;
+- Ed25519 signature over the raw SHA-256 digest.
+
+Trusted public keys are mirrored in `config/trusted-keys.json`. When the production key is rotated in the private application branch, this public copy must be updated before the first release signed by the new key.
 
 ## Failure behaviour
 
 - A failed build or audit must not create a public manifest.
-- A failed upload must leave the release as draft.
-- A failed post-upload verification must leave the release as draft and fail the workflow.
-- Published release assets are immutable by policy.
-- The application must keep its bundled or previously activated pack when manifest download, ZIP download, checksum verification, schema validation or activation fails.
-
-## Validation in this repository
-
-Every published release triggers `.github/workflows/validate-release.yml`. The workflow downloads `manifest.json` and the versioned ZIP, then verifies:
-
-- required manifest fields;
-- tag, filename and immutable URL consistency;
-- exact byte size;
-- exact SHA-256 checksum.
-
-The workflow can also be started manually for an existing release tag.
+- A failed upload or post-upload verification leaves the release as draft.
+- Published assets are immutable.
+- The application retains the previously active pack and bundled fallback when download, signature, schema, migration or activation fails.
