@@ -1,45 +1,48 @@
 # Noosphere Rules Data
 
-Public release channel for remotely updateable Noosphere game data.
+Public distribution channel for remotely updateable Noosphere game data.
 
-The repository does not contain the application source code. Production data is distributed as immutable GitHub Release assets so installed builds can refresh the catalog without requiring a new APK for every data-only update.
+This repository contains no application source code. It serves immutable, signed full-snapshot data packs through GitHub Releases so ordinary rule-data updates do not require a new APK.
 
-## Stable endpoint
-
-The application reads the latest production manifest from:
+## Stable manifest endpoint
 
 ```text
 https://github.com/Cataphracti/noosphere-rules-data/releases/latest/download/manifest.json
 ```
 
-The manifest points to an immutable versioned ZIP asset in the same release and contains its SHA-256 checksum.
-
 ## Release assets
 
-Every production release must contain exactly these public assets:
+Each published release contains:
 
-- `manifest.json` — small update descriptor fetched by the app;
-- `noosphere-rules-pack-<release-id>.zip` — complete versioned snapshot of remote game data.
+- `manifest.json` — signed update descriptor consumed by the app;
+- `noosphere-rules-pack.zip` — complete immutable data snapshot;
+- `generation-report.json` — generator metadata and audit counts.
 
-The ZIP filename and download URL are immutable after publication. Corrections are published as a new release.
+Release tags use:
+
+```text
+rules-data-<dataVersion>
+```
+
+The archive filename is stable, but its URL is immutable because every release has a unique tag. Existing releases and assets must never be replaced.
+
+## Security
+
+The app and this repository validate:
+
+- manifest schema and release URL consistency;
+- channel and monotonically increasing data revision;
+- exact archive size;
+- SHA-256 checksum;
+- Ed25519 signature over the raw SHA-256 digest;
+- trusted key/channel mapping.
+
+Trusted public verification keys are stored in `config/trusted-keys.json`. Private signing keys remain only in GitHub Actions Secrets in the private `Cataphracti/Noosphere` repository.
 
 ## Publication pipeline
 
-The private `Cataphracti/Noosphere` repository builds and audits the complete snapshot. It then calls the reusable publisher stored here in `.github/workflows/publish-release.yml` and passes the `RULES_DATA_PUBLISH_TOKEN` secret.
+The authoritative publisher is `.github/workflows/publish-rules-data-pack.yml` in the private application repository. It builds and signs the pack, creates a draft release here, uploads the archive first, verifies the remote archive, uploads `manifest.json` last, publishes the release as Latest, and validates the public endpoint.
 
-The publisher:
+Every published release also triggers `.github/workflows/validate-release.yml` in this repository for an independent SHA-256 and Ed25519 verification.
 
-1. downloads the ZIP artifact created by the caller workflow;
-2. calculates its byte size and SHA-256 checksum;
-3. generates `manifest.json`;
-4. creates a draft release in this repository;
-5. uploads the ZIP first;
-6. uploads `manifest.json` last;
-7. downloads and validates both remote assets;
-8. publishes the release only after verification succeeds.
-
-Uploading the manifest last prevents clients from seeing a pack URL before the pack is available.
-
-## Contract
-
-The machine-readable manifest contract is stored in `schemas/manifest.schema.json`; operational details are in `docs/PUBLISHING.md`. A caller workflow template for the private application repository is available in `examples/noosphere-caller-workflow.yml`.
+See `docs/PUBLISHING.md` and `schemas/manifest.schema.json` for the public contract.
