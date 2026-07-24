@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Cataphracti/noosphere-rules-data/blob/main/schemas/manifest.schema.json",
+  "title": "Noosphere remote rules manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "channel",
+    "releaseId",
+    "releaseTag",
+    "publishedAt",
+    "minimumAppVersion",
+    "minimumAppBuild",
+    "dataSchemaVersion",
+    "pack"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "channel": {
+      "type": "string",
+      "enum": ["production", "beta"]
+    },
+    "releaseId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "releaseTag": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^rules-v[A-Za-z0-9._-]+$"
+    },
+    "publishedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "minimumAppVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "minimumAppBuild": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "dataSchemaVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "pack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "fileName",
+        "url",
+        "sha256",
+        "sizeBytes"
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "const": "noosphere-rules-pack-v1"
+        },
+        "fileName": {
+          "type": "string",
+          "pattern": "^noosphere-rules-pack-[A-Za-z0-9._-]+\\.zip$"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://github\\.com/Cataphracti/noosphere-rules-data/releases/download/rules-v[A-Za-z0-9._-]+/noosphere-rules-pack-[A-Za-z0-9._-]+\\.zip$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "keyId", "value"],
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "enum": ["ed25519"]
+        },
+        "keyId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
