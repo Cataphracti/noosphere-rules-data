@@ -1,0 +1,83 @@
+# Example only. Copy the relevant jobs into Cataphracti/Noosphere after
+# the remote pack builder is implemented and tested.
+name: Build and publish rules data
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: Immutable data release identifier
+        required: true
+        type: string
+      channel:
+        description: Release channel
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - beta
+      minimum_app_version:
+        description: Minimum compatible application version
+        required: true
+        type: string
+      minimum_app_build:
+        description: Minimum compatible Android build number
+        required: true
+        type: number
+      data_schema_version:
+        description: Remote data schema version
+        required: true
+        default: 1
+        type: number
+      notes:
+        description: Public release notes
+        required: false
+        default: Noosphere rules data update.
+        type: string
+
+jobs:
+  build-pack:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run release checks
+        run: npm run release:gate:public
+
+      - name: Build complete remote rules snapshot
+        run: |
+          npm run build:rules-data-pack -- \
+            --release-id "${{ inputs.release_id }}" \
+            --output "dist/noosphere-rules-pack-${{ inputs.release_id }}.zip"
+
+      - name: Upload pack for the publisher job
+        uses: actions/upload-artifact@v4
+        with:
+          name: noosphere-rules-pack
+          path: dist/noosphere-rules-pack-${{ inputs.release_id }}.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build-pack
+    uses: Cataphracti/noosphere-rules-data/.github/workflows/publish-release.yml@755a27d0172101d946e6f6ebaefea59791eb57f6
+    with:
+      release_id: ${{ inputs.release_id }}
+      channel: ${{ inputs.channel }}
+      minimum_app_version: ${{ inputs.minimum_app_version }}
+      minimum_app_build: ${{ inputs.minimum_app_build }}
+      data_schema_version: ${{ inputs.data_schema_version }}
+      artifact_name: noosphere-rules-pack
+      notes: ${{ inputs.notes }}
+    secrets:
+      publish_token: ${{ secrets.RULES_DATA_PUBLISH_TOKEN }}
