@@ -1,114 +1,103 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Cataphracti/noosphere-rules-data/blob/main/schemas/manifest.schema.json",
-  "title": "Noosphere remote rules manifest",
+  "title": "Noosphere Rules Data Manifest",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schemaVersion",
+    "manifestSchemaVersion",
     "channel",
-    "releaseId",
-    "releaseTag",
+    "dataRevision",
+    "dataVersion",
+    "displayName",
     "publishedAt",
-    "minimumAppVersion",
-    "minimumAppBuild",
-    "dataSchemaVersion",
-    "pack"
+    "minAppVersionCode",
+    "requiredCapabilities",
+    "pack",
+    "notes"
   ],
   "properties": {
-    "schemaVersion": {
+    "manifestSchemaVersion": {
       "type": "integer",
       "const": 1
     },
     "channel": {
       "type": "string",
-      "enum": ["production", "beta"]
+      "enum": ["stable", "beta", "internal"]
     },
-    "releaseId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 100,
-      "pattern": "^[A-Za-z0-9._-]+$"
+    "dataRevision": {
+      "type": "integer",
+      "minimum": 1
     },
-    "releaseTag": {
+    "dataVersion": {
       "type": "string",
-      "minLength": 1,
-      "maxLength": 100,
-      "pattern": "^rules-v[A-Za-z0-9._-]+$"
+      "minLength": 1
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1
     },
     "publishedAt": {
       "type": "string",
       "format": "date-time"
     },
-    "minimumAppVersion": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 100
-    },
-    "minimumAppBuild": {
+    "minAppVersionCode": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 0
     },
-    "dataSchemaVersion": {
-      "type": "integer",
-      "minimum": 1
-    },
-    "notes": {
-      "type": "string",
-      "maxLength": 2000
+    "requiredCapabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "pack": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "format",
-        "fileName",
         "url",
+        "sizeBytes",
         "sha256",
-        "sizeBytes"
+        "signature",
+        "signatureAlgorithm",
+        "signaturePayload",
+        "signatureKeyId"
       ],
       "properties": {
-        "format": {
-          "type": "string",
-          "const": "noosphere-rules-pack-v1"
-        },
-        "fileName": {
-          "type": "string",
-          "pattern": "^noosphere-rules-pack-[A-Za-z0-9._-]+\\.zip$"
-        },
         "url": {
           "type": "string",
-          "format": "uri",
-          "pattern": "^https://github\\.com/Cataphracti/noosphere-rules-data/releases/download/rules-v[A-Za-z0-9._-]+/noosphere-rules-pack-[A-Za-z0-9._-]+\\.zip$"
+          "pattern": "^https://github\\.com/Cataphracti/noosphere-rules-data/releases/download/rules-data-[A-Za-z0-9._-]+/noosphere-rules-pack\\.zip$"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1
         },
         "sha256": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"
         },
-        "sizeBytes": {
-          "type": "integer",
-          "minimum": 1
-        }
-      }
-    },
-    "signature": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["algorithm", "keyId", "value"],
-      "properties": {
-        "algorithm": {
+        "signature": {
           "type": "string",
-          "enum": ["ed25519"]
+          "minLength": 1
         },
-        "keyId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 100
+        "signatureAlgorithm": {
+          "const": "ed25519"
         },
-        "value": {
+        "signaturePayload": {
+          "const": "sha256"
+        },
+        "signatureKeyId": {
           "type": "string",
           "minLength": 1
         }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
       }
     }
   }
