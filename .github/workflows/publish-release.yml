@@ -1,0 +1,241 @@
+name: Publish rules data release
+
+on:
+  workflow_call:
+    inputs:
+      release_id:
+        description: Immutable release identifier, for example 2026.07.24.1
+        required: true
+        type: string
+      channel:
+        description: Release channel
+        required: false
+        default: production
+        type: string
+      minimum_app_version:
+        description: Minimum compatible Noosphere version
+        required: true
+        type: string
+      minimum_app_build:
+        description: Minimum compatible Android build number
+        required: true
+        type: number
+      data_schema_version:
+        description: Remote pack schema version
+        required: true
+        type: number
+      artifact_name:
+        description: Name of the ZIP artifact uploaded by the caller workflow
+        required: false
+        default: noosphere-rules-pack
+        type: string
+      notes:
+        description: Short public release notes
+        required: false
+        default: Noosphere rules data update.
+        type: string
+    secrets:
+      publish_token:
+        description: Fine-grained token with Contents write access to Cataphracti/noosphere-rules-data
+        required: true
+
+concurrency:
+  group: rules-data-release-${{ inputs.release_id }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Validate release inputs
+        env:
+          RELEASE_ID: ${{ inputs.release_id }}
+          CHANNEL: ${{ inputs.channel }}
+          MINIMUM_APP_VERSION: ${{ inputs.minimum_app_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_ID" =~ ^[A-Za-z0-9._-]+$ ]] || {
+            echo "Invalid release_id: $RELEASE_ID" >&2
+            exit 1
+          }
+          [[ "$CHANNEL" == "production" || "$CHANNEL" == "beta" ]] || {
+            echo "channel must be production or beta" >&2
+            exit 1
+          }
+          [[ -n "$MINIMUM_APP_VERSION" ]] || {
+            echo "minimum_app_version must not be empty" >&2
+            exit 1
+          }
+
+      - name: Check out the public release contract
+        uses: actions/checkout@v4
+        with:
+          repository: Cataphracti/noosphere-rules-data
+          ref: main
+          path: contract
+
+      - name: Download pack artifact from caller workflow
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: .incoming
+
+      - name: Prepare immutable release assets
+        id: assets
+        env:
+          RELEASE_ID: ${{ inputs.release_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="noosphere-rules-pack-${RELEASE_ID}.zip"
+          mapfile -t packs < <(find .incoming -type f -name '*.zip' -print)
+          if [[ "${#packs[@]}" -ne 1 ]]; then
+            echo "Expected exactly one ZIP in the artifact; found ${#packs[@]}" >&2
+            exit 1
+          fi
+          if [[ "$(basename "${packs[0]}")" != "$expected" ]]; then
+            echo "Expected ZIP filename $expected, got $(basename "${packs[0]}")" >&2
+            exit 1
+          fi
+
+          mkdir -p .release
+          cp "${packs[0]}" ".release/$expected"
+          size_bytes="$(stat -c '%s' ".release/$expected")"
+          sha256="$(sha256sum ".release/$expected" | awk '{print $1}')"
+
+          echo "file_name=$expected" >> "$GITHUB_OUTPUT"
+          echo "size_bytes=$size_bytes" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "release_tag=rules-v${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate manifest
+        env:
+          RELEASE_ID: ${{ inputs.release_id }}
+          RELEASE_TAG: ${{ steps.assets.outputs.release_tag }}
+          CHANNEL: ${{ inputs.channel }}
+          MINIMUM_APP_VERSION: ${{ inputs.minimum_app_version }}
+          MINIMUM_APP_BUILD: ${{ inputs.minimum_app_build }}
+          DATA_SCHEMA_VERSION: ${{ inputs.data_schema_version }}
+          PACK_FILE_NAME: ${{ steps.assets.outputs.file_name }}
+          PACK_SIZE_BYTES: ${{ steps.assets.outputs.size_bytes }}
+          PACK_SHA256: ${{ steps.assets.outputs.sha256 }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const repository = 'Cataphracti/noosphere-rules-data';
+          const manifest = {
+            schemaVersion: 1,
+            channel: process.env.CHANNEL,
+            releaseId: process.env.RELEASE_ID,
+            releaseTag: process.env.RELEASE_TAG,
+            publishedAt: new Date().toISOString(),
+            minimumAppVersion: process.env.MINIMUM_APP_VERSION,
+            minimumAppBuild: Number(process.env.MINIMUM_APP_BUILD),
+            dataSchemaVersion: Number(process.env.DATA_SCHEMA_VERSION),
+            notes: process.env.RELEASE_NOTES,
+            pack: {
+              format: 'noosphere-rules-pack-v1',
+              fileName: process.env.PACK_FILE_NAME,
+              url: `https://github.com/${repository}/releases/download/${process.env.RELEASE_TAG}/${process.env.PACK_FILE_NAME}`,
+              sha256: process.env.PACK_SHA256,
+              sizeBytes: Number(process.env.PACK_SIZE_BYTES),
+            },
+          };
+
+          fs.writeFileSync('.release/manifest.json', `${JSON.stringify(manifest, null, 2)}\n`);
+          fs.writeFileSync('.release/release-notes.md', `${process.env.RELEASE_NOTES}\n`);
+          NODE
+
+      - name: Validate generated assets before upload
+        run: node contract/scripts/validate-release-assets.mjs .release/manifest.json .release
+
+      - name: Ensure release tag is unused
+        env:
+          GH_TOKEN: ${{ secrets.publish_token }}
+          RELEASE_TAG: ${{ steps.assets.outputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo Cataphracti/noosphere-rules-data >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists and will not be modified" >&2
+            exit 1
+          fi
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.publish_token }}
+          RELEASE_TAG: ${{ steps.assets.outputs.release_tag }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" \
+            --repo Cataphracti/noosphere-rules-data \
+            --target main \
+            --title "Noosphere rules data $RELEASE_ID" \
+            --notes-file .release/release-notes.md \
+            --draft
+
+      - name: Upload immutable ZIP first
+        env:
+          GH_TOKEN: ${{ secrets.publish_token }}
+          RELEASE_TAG: ${{ steps.assets.outputs.release_tag }}
+          PACK_FILE_NAME: ${{ steps.assets.outputs.file_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" ".release/$PACK_FILE_NAME" \
+            --repo Cataphracti/noosphere-rules-data
+
+      - name: Upload manifest last
+        env:
+          GH_TOKEN: ${{ secrets.publish_token }}
+          RELEASE_TAG: ${{ steps.assets.outputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" .release/manifest.json \
+            --repo Cataphracti/noosphere-rules-data
+
+      - name: Verify downloaded release assets
+        env:
+          GH_TOKEN: ${{ secrets.publish_token }}
+          RELEASE_TAG: ${{ steps.assets.outputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .verify
+          gh release download "$RELEASE_TAG" \
+            --repo Cataphracti/noosphere-rules-data \
+            --pattern manifest.json \
+            --pattern 'noosphere-rules-pack-*.zip' \
+            --dir .verify
+          node contract/scripts/validate-release-assets.mjs .verify/manifest.json .verify
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.publish_token }}
+          RELEASE_TAG: ${{ steps.assets.outputs.release_tag }}
+          CHANNEL: ${{ inputs.channel }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$CHANNEL" == "production" ]]; then
+            gh release edit "$RELEASE_TAG" \
+              --repo Cataphracti/noosphere-rules-data \
+              --draft=false \
+              --latest
+          else
+            gh release edit "$RELEASE_TAG" \
+              --repo Cataphracti/noosphere-rules-data \
+              --draft=false \
+              --prerelease
+          fi
