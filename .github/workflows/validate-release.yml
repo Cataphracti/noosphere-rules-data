@@ -1,4 +1,4 @@
-name: Validate release assets
+name: Validate signed release assets
 
 on:
   release:
@@ -17,7 +17,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out contract and validator
+      - name: Check out validation contract
         uses: actions/checkout@v4
 
       - name: Resolve release tag
@@ -36,12 +36,13 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p .release
           gh release download "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --pattern "manifest.json" \
-            --pattern "noosphere-rules-pack-*.zip" \
+            --pattern "noosphere-rules-pack.zip" \
             --dir .release
 
-      - name: Validate manifest, asset size and SHA-256
-        run: node scripts/validate-release-assets.mjs .release/manifest.json .release
+      - name: Validate manifest, SHA-256 and Ed25519 signature
+        run: node scripts/validate-release-assets.mjs .release/manifest.json .release config/trusted-keys.json
