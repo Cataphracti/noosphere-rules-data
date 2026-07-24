@@ -2,13 +2,19 @@
   {
     "keyId": "rules-2026-v1",
     "algorithm": "ed25519",
-    "publicKeyBase64": "UEXEpA61JkBM9dccWGelBbmbhYwkAFiw9IzpnWzfX9U=",
-    "channels": ["stable", "beta", "internal"]
+    "publicKeyBase64": "3wNA4nS7lkBEAsLeXAoYJdvWcQEFCkm+SBm+7sEvWGI=",
+    "channels": [
+      "stable",
+      "beta",
+      "internal"
+    ]
   },
   {
     "keyId": "rules-test-2026-v1",
     "algorithm": "ed25519",
     "publicKeyBase64": "SyHatktcOTQd8d5pQ1RjsS/CSxNYnfDDtiPZmrG3Ok8=",
-    "channels": ["internal"]
+    "channels": [
+      "internal"
+    ]
   }
 ]
