@@ -73,23 +73,32 @@ A production manifest must follow `schemas/manifest.schema.json` and contain:
 - lowercase SHA-256 digest;
 - optional Ed25519 signature block when signing is enabled.
 
-## Publisher workflow contract
+## Workflow split
 
-The publishing workflow belongs in the private `Cataphracti/Noosphere` repository because that repository contains the source data and release checks.
+The build and caller workflow belongs in the private `Cataphracti/Noosphere` repository because that repository contains the source data and release checks.
 
-The workflow must:
+The reusable cross-repository publisher is stored in this public repository:
+
+```text
+.github/workflows/publish-release.yml
+```
+
+The private caller passes the generated ZIP artifact and the `RULES_DATA_PUBLISH_TOKEN` secret to that reusable workflow. Pin the reusable workflow by commit SHA, as shown in `examples/noosphere-caller-workflow.yml`.
+
+Together the workflows must:
 
 1. Check out an explicit commit from `main` or an approved release branch.
 2. Run the existing public release gate and remote-data-specific validation.
 3. Build one complete snapshot pack; incremental patches are not used for v1.
 4. Produce a deterministic ZIP with the complete remotely replaceable dataset.
-5. Calculate byte size and SHA-256 from the exact ZIP that will be uploaded.
-6. Generate `manifest.json` from those calculated values.
-7. Create a draft GitHub Release in `Cataphracti/noosphere-rules-data`.
-8. Upload the ZIP first.
-9. Upload `manifest.json` last.
-10. Download both assets again and verify filename, size and SHA-256.
-11. Publish the draft release and mark it as the latest release.
+5. Upload that ZIP as an Actions artifact for the publisher job.
+6. Calculate byte size and SHA-256 from the exact ZIP that will be released.
+7. Generate `manifest.json` from those calculated values.
+8. Create a draft GitHub Release in `Cataphracti/noosphere-rules-data`.
+9. Upload the ZIP first.
+10. Upload `manifest.json` last.
+11. Download both assets again and verify filename, size and SHA-256.
+12. Publish a production release as Latest, or publish a beta release as a prerelease.
 
 Use `RULES_DATA_PUBLISH_TOKEN` only for the cross-repository release operations. Normal checks in the private application repository should continue to use its built-in `GITHUB_TOKEN`.
 
