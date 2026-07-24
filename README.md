@@ -23,18 +23,23 @@ Every production release must contain exactly these public assets:
 
 The ZIP filename and download URL are immutable after publication. Corrections are published as a new release.
 
-## Publication order
+## Publication pipeline
 
-1. Build the complete snapshot in the private `Cataphracti/Noosphere` repository.
-2. Validate the snapshot and calculate its SHA-256 checksum.
-3. Create a draft release in this repository.
-4. Upload the ZIP pack.
-5. Upload `manifest.json` last.
-6. Verify the remote assets and checksum.
-7. Publish the release and mark it as latest.
+The private `Cataphracti/Noosphere` repository builds and audits the complete snapshot. It then calls the reusable publisher stored here in `.github/workflows/publish-release.yml` and passes the `RULES_DATA_PUBLISH_TOKEN` secret.
+
+The publisher:
+
+1. downloads the ZIP artifact created by the caller workflow;
+2. calculates its byte size and SHA-256 checksum;
+3. generates `manifest.json`;
+4. creates a draft release in this repository;
+5. uploads the ZIP first;
+6. uploads `manifest.json` last;
+7. downloads and validates both remote assets;
+8. publishes the release only after verification succeeds.
 
 Uploading the manifest last prevents clients from seeing a pack URL before the pack is available.
 
 ## Contract
 
-The machine-readable manifest contract is stored in `schemas/manifest.schema.json`; operational details are in `docs/PUBLISHING.md`.
+The machine-readable manifest contract is stored in `schemas/manifest.schema.json`; operational details are in `docs/PUBLISHING.md`. A caller workflow template for the private application repository is available in `examples/noosphere-caller-workflow.yml`.
