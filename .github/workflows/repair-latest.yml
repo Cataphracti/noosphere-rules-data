@@ -1,0 +1,55 @@
+name: Repair Latest release channel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/repair-latest.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Mark internal fixtures as prereleases
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tag in rules-data-2026.07.23-910-test rules-data-2026.07.24-911-test; do
+            release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq '.id')
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              -F prerelease=true \
+              -f make_latest=false >/dev/null
+          done
+
+      - name: Verify stable Latest endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')
+          curl -L --fail --retry 3 \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/manifest.json" \
+            -o /tmp/latest-manifest.json
+          test "$(jq -r '.channel' /tmp/latest-manifest.json)" = "stable"
+          echo "Latest restored to ${latest_tag}"
+
+      - name: Remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/repair-latest.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: remove Latest repair workflow"
+          git push origin HEAD:main
