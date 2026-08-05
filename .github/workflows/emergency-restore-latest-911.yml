@@ -16,6 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
       - name: Restore signed stable revision 911 as Latest
         shell: bash
         env:
@@ -32,10 +37,37 @@ jobs:
           latest_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')
           test "$latest_tag" = "$TARGET_TAG"
 
-          curl -L --fail --retry 5 \
-            "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/manifest.json" \
-            -o /tmp/latest-manifest.json
-          test "$(jq -r '.channel' /tmp/latest-manifest.json)" = "stable"
-          test "$(jq -r '.dataRevision' /tmp/latest-manifest.json)" = "911"
-          test "$(jq -r '.dataVersion' /tmp/latest-manifest.json)" = "2026.07.27-911"
+          manifest_ok=false
+          for attempt in $(seq 1 12); do
+            curl -L --fail --retry 3 \
+              "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/manifest.json?emergency=${GITHUB_RUN_ID}-${attempt}" \
+              -o /tmp/latest-manifest.json
+            if [[ "$(jq -r '.channel' /tmp/latest-manifest.json)" == "stable" \
+               && "$(jq -r '.dataRevision' /tmp/latest-manifest.json)" == "911" \
+               && "$(jq -r '.dataVersion' /tmp/latest-manifest.json)" == "2026.07.27-911" ]]; then
+              manifest_ok=true
+              break
+            fi
+            sleep 5
+          done
+          test "$manifest_ok" = true
+
+          restored_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          mkdir -p .github
+          jq -n \
+            --arg restoredAt "$restored_at" \
+            --arg latestTag "$latest_tag" \
+            --arg dataVersion "$(jq -r '.dataVersion' /tmp/latest-manifest.json)" \
+            --argjson dataRevision "$(jq -r '.dataRevision' /tmp/latest-manifest.json)" \
+            '{restoredAt: $restoredAt, latestTag: $latestTag, dataRevision: $dataRevision, dataVersion: $dataVersion, reason: "Emergency compatibility rollback for Noosphere beta.56 bundled revision 909"}' \
+            > .github/emergency-latest-state.json
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/emergency-latest-state.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: record emergency Latest rollback to Rules Data 911"
+            git push origin HEAD:main
+          fi
+
           echo "Latest restored to ${latest_tag}"
