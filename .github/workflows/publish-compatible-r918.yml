@@ -1,0 +1,106 @@
+name: Publish mobile-compatible rules data r918
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-compatible-r918.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-mobile-compatible-r918
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RULES_DATA_ED25519_PRIVATE_KEY_BASE64: ${{ secrets.RULES_DATA_ED25519_PRIVATE_KEY_BASE64 }}
+      SOURCE_TAG: rules-data-balance-2026.08-r917
+      TARGET_TAG: rules-data-balance-2026.08-r918
+      OUTPUT_DIR: dist/r918
+    steps:
+      - name: Check out publisher
+        uses: actions/checkout@v4
+
+      - name: Require trusted signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${RULES_DATA_ED25519_PRIVATE_KEY_BASE64:-}" ]]; then
+            echo "RULES_DATA_ED25519_PRIVATE_KEY_BASE64 is unavailable to the public publisher." >&2
+            exit 1
+          fi
+
+      - name: Download immutable r917 source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source
+          gh release download "$SOURCE_TAG"             --repo "$GITHUB_REPOSITORY"             --pattern noosphere-rules-pack.zip             --dir source
+
+      - name: Adapt, validate and sign r918
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/publish-compatible-r918.mjs             source/noosphere-rules-pack.zip             "$OUTPUT_DIR"
+          node scripts/validate-release-assets.mjs             "$OUTPUT_DIR/manifest.json"             "$OUTPUT_DIR"             config/trusted-keys.json
+
+      - name: Reject immutable tag collision
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TARGET_TAG" >/dev/null 2>&1; then
+            echo "Immutable release already exists: $TARGET_TAG" >&2
+            exit 1
+          fi
+
+      - name: Create draft and upload pack first
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases"             -f tag_name="$TARGET_TAG"             -f target_commitish=main             -f name="Балансные правки — август 2026"             -f body="Rules data revision 918"             -F draft=true             -F prerelease=false)
+          release_id=$(jq -r '.id' <<<"$release_json")
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          gh release upload "$TARGET_TAG"             "$OUTPUT_DIR/noosphere-rules-pack.zip"             "$OUTPUT_DIR/generation-report.json"             --repo "$GITHUB_REPOSITORY"
+
+      - name: Verify uploaded archive bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p verify
+          gh release download "$TARGET_TAG"             --repo "$GITHUB_REPOSITORY"             --pattern noosphere-rules-pack.zip             --dir verify
+          test "$(sha256sum "$OUTPUT_DIR/noosphere-rules-pack.zip" | cut -d' ' -f1)" =                "$(sha256sum verify/noosphere-rules-pack.zip | cut -d' ' -f1)"
+
+      - name: Upload manifest last
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$TARGET_TAG"             "$OUTPUT_DIR/manifest.json"             --repo "$GITHUB_REPOSITORY"
+
+      - name: Publish atomically as Latest
+        shell: bash
+        env:
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"             -F draft=false             -F prerelease=false             -f make_latest=true >/dev/null
+
+      - name: Verify public Latest endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')
+          test "$latest_tag" = "$TARGET_TAG"
+          curl -L --fail --retry 5             "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/manifest.json"             -o latest-manifest.json
+          test "$(jq -r '.channel' latest-manifest.json)" = "stable"
+          test "$(jq -r '.dataRevision' latest-manifest.json)" = "918"
+          test "$(jq -r '.dataVersion' latest-manifest.json)" = "balance-2026.08-r918"
+          test "$(jq -r '.minAppVersionCode' latest-manifest.json)" = "158"
